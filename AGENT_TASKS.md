@@ -1,150 +1,199 @@
-# Agent Tasks Handoff: Semantic Dashboard
+# AGENT_TASKS — P05 Docs Chat
 
-P04 del currículum Full Stack AI Developer.
+## Contexto
 
-## Objetivo
+Pipeline RAG completo: ingest → chunk → embed → store → retrieve → generate.
+Cada respuesta muestra fuentes con fragmentos exactos y similarity score.
 
-Dashboard con búsqueda semántica en lenguaje natural sobre una colección de
-preguntas de compradores (simulando SoporteML). El usuario escribe en lenguaje
-natural y el sistema retorna los resultados más similares semánticamente usando
-embeddings + pgvector.
+Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic claude-sonnet-4-6, pdf-parse, LangChain.
 
-## Stack
+---
 
-- Next.js (App Router), TypeScript, Tailwind CSS, shadcn/ui
-- Supabase (Auth + Postgres + RLS + pgvector) — proyecto reutilizado de P03
-- OpenAI SDK (`openai`) para text-embedding-3-small
-- Tabla nueva: `support_items` con columna vector(1536)
+## FASE 1 — Database schema
 
-## Convenciones heredadas
+### TASK-01: Migración Supabase — tablas documents y document_chunks
 
-- proxy.ts en la raíz — función exportada como `proxy`
-- Rutas protegidas bajo /dashboard
-- Server Actions en /lib/actions/
-- Sin Prisma, Supabase client directo
+**Contexto:** Necesitamos dos tablas. `documents` guarda metadata del archivo original. `document_chunks` guarda los fragmentos con su embedding.
 
-## Tasks
+**Instrucciones para el agente:**
 
-### 1. Instalar dependencias nuevas
+1. Leer `.knowledge/conventions.md` antes de empezar
+2. Crear migración en `supabase/migrations/`
+3. Crear tabla `documents` con campos: id, user_id, title, file_type, file_size, status, created_at
+4. Crear tabla `document_chunks` con campos: id, document_id, content, embedding vector(1536), chunk_index, metadata jsonb, created_at
+5. Crear función RPC `match_document_chunks(query_embedding vector, match_threshold float, match_count int, document_ids uuid[])` para similarity search
+6. Aplicar RLS: user solo ve sus propios documents y chunks
+7. Verificar con Supabase MCP que la migración aplicó correctamente
 
-- [ ] `npm install openai`
-- [ ] Agregar `OPENAI_API_KEY` a `.env.local`
-- [ ] Agregar `OPENAI_API_KEY` a `.env.example` (sin valor real)
+**Criterios de aceptación:**
 
-### 2. Schema Supabase
+- [ ] Tablas creadas con tipos correctos
+- [ ] RLS activo en ambas tablas
+- [ ] Función RPC retorna chunks ordenados por similitud
+- [ ] Index en embedding column (ivfflat o hnsw)
 
-- [ ] Crear tabla `support_items`:
-  - `id` uuid PK default gen_random_uuid()
-  - `user_id` uuid FK → auth.users
-  - `buyer_nickname` text not null
-  - `product_title` text not null
-  - `question_text` text not null
-  - `category` text not null (envio | garantia | precio | tecnico | general)
-  - `status` text not null default 'pending' (pending | resolved | escalated)
-  - `created_at` timestamptz default now()
-  - `embedding` vector(1536)
-- [ ] RLS: usuario solo accede a sus propios items
-- [ ] Crear función SQL para similarity search:
+---
 
-```sql
-create or replace function match_support_items(
-  query_embedding vector(1536),
-  match_threshold float,
-  match_count int,
-  p_user_id uuid
-)
-returns table (
-  id uuid,
-  buyer_nickname text,
-  product_title text,
-  question_text text,
-  category text,
-  status text,
-  created_at timestamptz,
-  similarity float
-)
-language sql stable
-as $$
-  select
-    id, buyer_nickname, product_title, question_text,
-    category, status, created_at,
-    1 - (embedding <=> query_embedding) as similarity
-  from support_items
-  where user_id = p_user_id
-    and 1 - (embedding <=> query_embedding) > match_threshold
-  order by embedding <=> query_embedding
-  limit match_count;
-$$;
+## FASE 2 — Ingestion pipeline
+
+### TASK-02: API route POST /api/documents/upload
+
+**Contexto:** Recibe un archivo PDF o MD, extrae texto, chunquea, embeds y guarda en Supabase.
+
+**Instrucciones para el agente:**
+
+1. Crear `src/app/api/documents/upload/route.ts`
+2. Parsear form-data con el archivo
+3. Extraer texto: usar `pdf-parse` para PDF, leer directo para MD
+4. Chunking con LangChain `RecursiveCharacterTextSplitter`: chunk_size=1000, chunk_overlap=200
+5. Para cada chunk: generar embedding con OpenAI `text-embedding-3-small`
+6. Guardar documento en tabla `documents` con status='processing' → luego 'ready'
+7. Guardar chunks en tabla `document_chunks` con embedding y metadata (page_number si aplica)
+8. Manejar errores: si falla el embedding de un chunk, loguear y continuar
+9. Retornar `{ document_id, chunk_count, status }`
+
+**Criterios de aceptación:**
+
+- [ ] PDF de 10 páginas se procesa sin error
+- [ ] Chunks guardados con embeddings válidos (vector de 1536 floats)
+- [ ] Status del documento se actualiza a 'ready' al terminar
+- [ ] Error handling no rompe el proceso completo por un chunk fallido
+
+---
+
+### TASK-03: API route GET /api/documents
+
+**Contexto:** Lista los documentos del usuario con metadata básica.
+
+**Instrucciones para el agente:**
+
+1. Crear `src/app/api/documents/route.ts`
+2. Consultar tabla `documents` filtrando por user_id del session
+3. Retornar array con: id, title, file_type, status, chunk_count (count de document_chunks), created_at
+4. Ordenar por created_at DESC
+
+**Criterios de aceptación:**
+
+- [ ] Solo retorna documentos del usuario autenticado
+- [ ] chunk_count es correcto
+
+---
+
+### TASK-04: API route DELETE /api/documents/[id]
+
+**Instrucciones para el agente:**
+
+1. Verificar ownership (document.user_id === session.user.id)
+2. Eliminar document_chunks asociados
+3. Eliminar document
+4. Retornar 204
+
+**Criterios de aceptación:**
+
+- [ ] No puede eliminar documentos de otro usuario (retorna 403)
+- [ ] Chunks se eliminan en cascada o explícitamente
+
+---
+
+## FASE 3 — Retrieval + Generation
+
+### TASK-05: API route POST /api/chat
+
+**Contexto:** Recibe query del usuario + lista de document_ids seleccionados. Hace retrieval y genera respuesta con fuentes.
+
+**Instrucciones para el agente:**
+
+1. Crear `src/app/api/chat/route.ts`
+2. Recibir: `{ query: string, document_ids: string[], history: Message[] }`
+3. Embeds la query con `text-embedding-3-small`
+4. Llamar RPC `match_document_chunks` con threshold=0.7, count=5, document_ids
+5. Construir system prompt con los chunks como contexto
+6. El system prompt debe indicar explícitamente: no agregar headers markdown, no texto introductorio, responder basado SOLO en el contexto provisto
+7. Llamar Anthropic SDK con streaming habilitado
+8. En la respuesta incluir: stream del texto + sources array `[{ chunk_id, content_preview, similarity_score, document_title }]`
+9. Usar SSE para streaming (patrón del P03)
+
+**Criterios de aceptación:**
+
+- [ ] Respuesta llega en streaming
+- [ ] Sources array incluye los chunks usados con su score
+- [ ] Si no hay chunks relevantes (todos bajo threshold), responde "No encontré información relevante en los documentos seleccionados"
+- [ ] History se incluye en el contexto para multi-turn
+
+---
+
+## FASE 4 — UI
+
+### TASK-06: Página /dashboard/documents — gestión de documentos
+
+**Instrucciones para el agente:**
+
+1. Crear `src/app/dashboard/documents/page.tsx`
+2. Lista de documentos con: título, tipo, estado (badge), chunk count, fecha, botón eliminar
+3. Componente de upload: drag & drop o file picker, acepta PDF y MD únicamente
+4. Progress indicator durante el procesamiento
+5. Estado vacío con call to action claro
+
+**Criterios de aceptación:**
+
+- [ ] Upload funciona para PDF y MD
+- [ ] Estado 'processing' se refleja en la UI
+- [ ] Eliminar documento actualiza la lista
+
+---
+
+### TASK-07: Página /dashboard/chat — interfaz de chat con RAG
+
+**Instrucciones para el agente:**
+
+1. Crear `src/app/dashboard/chat/page.tsx`
+2. Sidebar izquierdo: lista de documentos con checkboxes para seleccionar cuáles usar
+3. Área principal: chat interface con historial
+4. Cada respuesta del asistente muestra debajo: sección colapsable "Fuentes" con fragmentos y score
+5. Score mostrado como porcentaje (similarity \* 100) con color: verde >80%, amarillo 60-80%, gris <60%
+6. Input con envío por Enter o botón
+7. Skeleton loader mientras llega la respuesta
+
+**Criterios de aceptación:**
+
+- [ ] Streaming visible en tiempo real
+- [ ] Fuentes expandibles por respuesta
+- [ ] Selección de documentos persiste durante la sesión
+- [ ] Al menos un documento debe estar seleccionado para poder enviar
+
+---
+
+## FASE 5 — Skill + Review
+
+### TASK-08: Crear skill rag-pipeline
+
+**Instrucciones para el agente:**
+
+1. Crear `.agents/skills/rag-pipeline/SKILL.md`
+2. El skill debe documentar: estrategia de chunking elegida y por qué, threshold de similarity recomendado, patrón de system prompt para RAG, estructura de la respuesta con sources
+
+**Criterios de aceptación:**
+
+- [ ] Skill invocable con contexto: "implementar RAG pipeline"
+- [ ] Incluye decisiones y tradeoffs, no solo pasos
+
+---
+
+### TASK-09: PR Review
+
+```
+@.agents/skills/pr-review/SKILL.md
+Revisar P05 completo antes del commit final.
+Foco: ownership checks en todas las API routes, manejo de errores en embedding pipeline, threshold de similarity configurable via env var.
 ```
 
-- [ ] `schema.sql` con todo el SQL listo para documentar
+---
 
-### 3. Seed data
+## Orden de ejecución
 
-- [ ] `lib/seed/support-items.ts` — script que inserta 40 preguntas ficticias
-      variadas en categorías y texto para que la búsqueda semántica sea interesante.
-      Incluir preguntas sobre: envíos a distintas provincias, garantías, precios,
-      specs técnicas, devoluciones, stock.
-- [ ] El script genera embeddings para cada pregunta llamando a OpenAI y las
-      inserta con el vector incluido.
-- [ ] Exportar función `runSeed()` que se pueda invocar desde una API route.
-- [ ] `app/api/seed/route.ts` — GET protegido que llama runSeed() (solo para dev)
+```
+TASK-01 → TASK-02 → TASK-03 → TASK-04 → TASK-05 → TASK-06 → TASK-07 → TASK-08 → TASK-09
+```
 
-### 4. API Route — embedding de queries
-
-- [ ] `app/api/search/route.ts`
-  - Acepta POST `{ query: string, threshold?: number, limit?: number }`
-  - threshold default: 0.5, limit default: 10
-  - Genera embedding de la query con text-embedding-3-small
-  - Llama a `match_support_items` via Supabase RPC
-  - Retorna array de resultados con similarity score
-  - Auth check: rechaza si no hay sesión activa
-  - Validación: query requerida, max 500 chars
-
-### 5. Server Actions — support items
-
-- [ ] `lib/actions/support.ts`:
-  - `getItems(filters?)`: retorna todos los items del usuario.
-    Filtros opcionales: category, status.
-  - `getStats()`: retorna conteos por categoría y por status para
-    los KPI cards del dashboard.
-
-### 6. UI — Dashboard principal
-
-- [ ] `app/dashboard/page.tsx` — Server Component, carga stats y lista inicial
-- [ ] `components/dashboard/StatsBar.tsx` — 4 KPI cards:
-      Total items | Pendientes | Resueltos | Escalados
-- [ ] `components/dashboard/SearchBar.tsx` — Client Component:
-      input de texto, botón buscar, estado de loading
-- [ ] `components/dashboard/ResultsTable.tsx` — Client Component:
-      tabla con columnas: Comprador | Producto | Pregunta | Categoría | Estado |
-      Similitud (barra de progreso con %)
-- [ ] `components/dashboard/ThresholdSlider.tsx` — Client Component:
-      slider 0.0–1.0 paso 0.05, valor visible, persiste en sessionStorage
-- [ ] `components/dashboard/SemanticDashboard.tsx` — Client Component
-      orquestador: combina SearchBar + ThresholdSlider + ResultsTable,
-      maneja el estado de búsqueda y llama a /api/search
-
-### 7. UX de búsqueda
-
-- [ ] Estado inicial: muestra todos los items (sin búsqueda activa)
-- [ ] Durante búsqueda: skeleton loader en la tabla
-- [ ] Con resultados: tabla ordenada por similarity DESC, barra de color
-      semántico (verde ≥ 0.8, amarillo ≥ 0.6, rojo < 0.6)
-- [ ] Sin resultados: mensaje "No se encontraron coincidencias. Probá bajar
-      el umbral de similitud."
-- [ ] Badge visible que indica si la vista es "Semántica" o "Todos"
-
-### 8. Tests
-
-- [ ] `app/api/search/__tests__/route.test.ts`:
-  - POST sin auth → 401
-  - POST sin query → 400
-  - POST con query > 500 chars → 400
-- [ ] `lib/actions/__tests__/support.test.ts`:
-  - getItems() solo retorna items del usuario autenticado
-
-## Orden de ejecución recomendado
-
-Tasks 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
-Correr $pr-review entre task 4 y 5, y al final antes de cerrar P04.
+Cada task = un commit en Conventional Commits format.
+No avanzar a la siguiente sin que los criterios de aceptación estén cumplidos.
