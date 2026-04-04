@@ -8,12 +8,13 @@ type Document = {
   chunk_count: number
 }
 
-async function getReadyDocuments(): Promise<Document[]> {
+async function getReadyDocuments(userId: string): Promise<Document[]> {
   const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('documents')
     .select('id, title, document_chunks(count)')
+    .eq('user_id', userId)
     .eq('status', 'ready')
     .order('created_at', { ascending: false })
 
@@ -31,7 +32,7 @@ export default async function ChatPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const documents = await getReadyDocuments()
+  const documents = await getReadyDocuments(user.id)
 
   return (
     <div className="container mx-auto px-4 py-10">
