@@ -27,10 +27,10 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Tablas creadas con tipos correctos
-- [ ] RLS activo en ambas tablas
-- [ ] Función RPC retorna chunks ordenados por similitud
-- [ ] Index en embedding column (ivfflat o hnsw)
+- [x] Tablas creadas con tipos correctos
+- [x] RLS activo en ambas tablas
+- [x] Función RPC retorna chunks ordenados por similitud
+- [x] Index en embedding column (ivfflat o hnsw)
 
 ---
 
@@ -54,10 +54,10 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] PDF de 10 páginas se procesa sin error
-- [ ] Chunks guardados con embeddings válidos (vector de 1536 floats)
-- [ ] Status del documento se actualiza a 'ready' al terminar
-- [ ] Error handling no rompe el proceso completo por un chunk fallido
+- [x] PDF de 10 páginas se procesa sin error
+- [x] Chunks guardados con embeddings válidos (vector de 1536 floats)
+- [x] Status del documento se actualiza a 'ready' al terminar
+- [x] Error handling no rompe el proceso completo por un chunk fallido
 
 ---
 
@@ -74,8 +74,8 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Solo retorna documentos del usuario autenticado
-- [ ] chunk_count es correcto
+- [x] Solo retorna documentos del usuario autenticado
+- [x] chunk_count es correcto
 
 ---
 
@@ -90,8 +90,8 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] No puede eliminar documentos de otro usuario (retorna 403)
-- [ ] Chunks se eliminan en cascada o explícitamente
+- [x] No puede eliminar documentos de otro usuario (retorna 403)
+- [x] Chunks se eliminan en cascada o explícitamente
 
 ---
 
@@ -115,10 +115,10 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Respuesta llega en streaming
-- [ ] Sources array incluye los chunks usados con su score
-- [ ] Si no hay chunks relevantes (todos bajo threshold), responde "No encontré información relevante en los documentos seleccionados"
-- [ ] History se incluye en el contexto para multi-turn
+- [x] Respuesta llega en streaming
+- [x] Sources array incluye los chunks usados con su score
+- [x] Si no hay chunks relevantes (todos bajo threshold), responde "No encontré información relevante en los documentos seleccionados"
+- [x] History se incluye en el contexto para multi-turn
 
 ---
 
@@ -136,9 +136,9 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Upload funciona para PDF y MD
-- [ ] Estado 'processing' se refleja en la UI
-- [ ] Eliminar documento actualiza la lista
+- [x] Upload funciona para PDF y MD
+- [x] Estado 'processing' se refleja en la UI
+- [x] Eliminar documento actualiza la lista
 
 ---
 
@@ -156,10 +156,10 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Streaming visible en tiempo real
-- [ ] Fuentes expandibles por respuesta
-- [ ] Selección de documentos persiste durante la sesión
-- [ ] Al menos un documento debe estar seleccionado para poder enviar
+- [x] Streaming visible en tiempo real
+- [x] Fuentes expandibles por respuesta
+- [x] Selección de documentos persiste durante la sesión
+- [x] Al menos un documento debe estar seleccionado para poder enviar
 
 ---
 
@@ -174,8 +174,8 @@ Stack: Next.js 16, Supabase pgvector, OpenAI text-embedding-3-small, Anthropic c
 
 **Criterios de aceptación:**
 
-- [ ] Skill invocable con contexto: "implementar RAG pipeline"
-- [ ] Incluye decisiones y tradeoffs, no solo pasos
+- [x] Skill invocable con contexto: "implementar RAG pipeline"
+- [x] Incluye decisiones y tradeoffs, no solo pasos
 
 ---
 
